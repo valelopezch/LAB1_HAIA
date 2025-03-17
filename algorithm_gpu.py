@@ -78,15 +78,15 @@ def evaluate(individual):
 
 class CatanGA:
     def __init__(self, 
-                 population_size=20, 
-                 generations=50, 
-                 mutation_prob=0.2, 
+                 population_size=100, 
+                 generations=150, 
+                 mutation_prob=0.1, 
                  crossover_prob=0.5, 
                  selection_method="tournament", 
-                 tournament_size=3,
-                 mutation_sigma=0.1, 
-                 mutation_indpb=0.2, 
-                 num_games_per_individual=5):
+                 tournament_size=4,
+                 mutation_sigma=0.05, 
+                 mutation_indpb=0.1, 
+                 num_games_per_individual=100):
 
         self.population_size = population_size
         self.generations = generations
