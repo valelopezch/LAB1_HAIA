@@ -35,7 +35,7 @@ def swap_probabilities_cp(prob_array):
 def evaluate(individual):
 
     global fitness_cache
-    individual_tuple = tuple(individual)
+    individual_tuple = tuple(individual.get())
 
     if individual_tuple in fitness_cache:
         return fitness_cache[individual_tuple]
