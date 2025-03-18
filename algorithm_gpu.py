@@ -12,16 +12,15 @@ from Agents.PabloAleixAlexAgent import PabloAleixAlexAgent as paaa
 from Agents.SigmaAgent import SigmaAgent as sa
 from Agents.TristanAgent import TristanAgent as ta
 from Managers.GameDirector import GameDirector
+# from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import ThreadPoolExecutor
-
-import cupy as cp
 
 AGENTS = [ra, aha, apa, apja, cza, ca, ea, paaa, sa, ta]
 N = 100
 fitness_cache = {}
 
-def swap_probabilities_cp(prob_array):
-    sorted_indices = cp.argsort(prob_array) 
+def swap_probabilities_np(prob_array):
+    sorted_indices = np.argsort(prob_array) 
     swapped_probs = prob_array.copy() 
     n = len(prob_array)
     
@@ -29,28 +28,24 @@ def swap_probabilities_cp(prob_array):
         low_idx, high_idx = sorted_indices[i], sorted_indices[n - i - 1]
         swapped_probs[low_idx], swapped_probs[high_idx] = swapped_probs[high_idx], swapped_probs[low_idx]
 
-    return swapped_probs / cp.sum(swapped_probs)
+    return swapped_probs / np.sum(swapped_probs)
 
 
 def evaluate(individual):
 
     global fitness_cache
-    individual_tuple = tuple(cp.array(individual).get())
+    individual_tuple = tuple(individual)
 
     if individual_tuple in fitness_cache:
         return fitness_cache[individual_tuple]
     
     total_wins = 0
     player = random.choices(AGENTS, weights=individual, k=1)[0]
-    player_index = AGENTS.index(player)
-    aux = cp.concatenate((
-        cp.array(individual[:player_index]),  # Convert the first slice to cupy array
-        cp.array(individual[player_index + 1:])  # Convert the second slice to cupy array
-    ))
-    aux_swap = swap_probabilities_cp(aux)
+    aux = np.delete(individual, AGENTS.index(player))
+    aux_swap = swap_probabilities_np(aux)
 
     for _ in range(N):
-        opponents = cp.random.choice([agent for agent in AGENTS if agent != player], size=3, p=aux_swap)
+        opponents = np.random.choice([agent for agent in AGENTS if agent != player], size=3, p=aux_swap)
         players = [player] + list(opponents)
         random.shuffle(players)
 
@@ -108,14 +103,14 @@ class CatanGA:
         creator.create("Individual", list, fitness=creator.FitnessMax)
 
         # def generate_probabilities():
-        #     probs = cp.random.dirichlet(cp.ones(len(AGENTS)), size=1)[0]
+        #     probs = np.random.dirichlet(np.ones(len(AGENTS)), size=1)[0]
         #     probs = probs.tolist()
         #     self.normalize(probs)
         #     return probs
 
         def generate_probabilities():
-            probs = cp.random.dirichlet(cp.ones(len(AGENTS)), size=1)[0].get()
-            return cp.round(probs, 4)
+            probs = np.random.dirichlet(np.ones(len(AGENTS)), size=1)[0]
+            return np.round(probs, 4)
 
         self.toolbox.register("individual", tools.initIterate, creator.Individual, generate_probabilities)
         self.toolbox.register("population", tools.initRepeat, list, self.toolbox.individual)
@@ -135,18 +130,20 @@ class CatanGA:
 
         self.toolbox.register("evaluate", evaluate)
 
+        # num_cores = multiprocessing.npu_count()  # Get available npU cores
+        # self.pool = multiprocessing.Pool(processes=num_cores)  # Create a process pool
         self.pool = ThreadPoolExecutor()
         self.toolbox.register("map", self.pool.map)
 
     def normalize(self, individual):
         total = sum(individual)
         for i in range(len(individual)):
-            individual[i] = cp.round(individual[i] / total, 4)
+            individual[i] = np.round(individual[i] / total, 4)
 
         difference = 1.0 - sum(individual)
         if difference != 0:
             max_index = individual.index(max(individual))
-            individual[max_index] = cp.round(individual[max_index] + difference, 4)
+            individual[max_index] = np.round(individual[max_index] + difference, 4)
         return
 
     def cx_blend_weighted(self, ind1, ind2, alpha=0.5):
@@ -186,8 +183,8 @@ class CatanGA:
         hall_of_fame = tools.HallOfFame(1)
 
         stats = tools.Statistics(lambda ind: ind.fitness.values)
-        stats.register("avg", cp.mean)
-        stats.register("max", cp.max)
+        stats.register("avg", np.mean)
+        stats.register("max", np.max)
 
         self.logbook.clear()
         fitness_cache = {}
