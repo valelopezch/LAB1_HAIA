@@ -42,7 +42,11 @@ def evaluate(individual):
     
     total_wins = 0
     player = random.choices(AGENTS, weights=individual, k=1)[0]
-    aux = cp.concatenate((individual[:AGENTS.index(player)], individual[AGENTS.index(player) + 1:]))
+    player_index = AGENTS.index(player)
+    aux = cp.concatenate((
+        cp.array(individual[:player_index]),  # Convert the first slice to cupy array
+        cp.array(individual[player_index + 1:])  # Convert the second slice to cupy array
+    ))
     aux_swap = swap_probabilities_cp(aux)
 
     for _ in range(N):
