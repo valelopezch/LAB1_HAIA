@@ -27,7 +27,7 @@ def swap_probabilities_np(prob_array):
         low_idx, high_idx = sorted_indices[i], sorted_indices[n - i - 1]
         swapped_probs[low_idx], swapped_probs[high_idx] = swapped_probs[high_idx], swapped_probs[low_idx]
 
-    return swapped_probs / np.sum(swapped_probs)
+    return swapped_probs
 
 
 def evaluate(individual):
@@ -42,6 +42,7 @@ def evaluate(individual):
     player = random.choices(AGENTS, weights=individual, k=1)[0]
     aux = np.delete(individual, AGENTS.index(player))
     aux_swap = swap_probabilities_np(aux)
+    aux_swap = aux_swap / np.sum(aux_swap)
 
     for _ in range(N):
         opponents = np.random.choice([agent for agent in AGENTS if agent != player], size=3, p=aux_swap)
@@ -101,12 +102,6 @@ class CatanGA:
         creator.create("FitnessMax", base.Fitness, weights=(1.0,))
         creator.create("Individual", list, fitness=creator.FitnessMax)
 
-        # def generate_probabilities():
-        #     probs = np.random.dirichlet(np.ones(len(AGENTS)), size=1)[0]
-        #     probs = probs.tolist()
-        #     self.normalize(probs)
-        #     return probs
-
         def generate_probabilities():
             probs = np.random.dirichlet(np.ones(len(AGENTS)), size=1)[0]
             return np.round(probs, 4)
@@ -125,8 +120,8 @@ class CatanGA:
 
         self.toolbox.register("mate", self.cx_blend_weighted)
         # self.toolbox.register("mate", self.cx_two_point_normalized)
-        self.toolbox.register("mutate", self.mut_gaussian_normalized, sigma=self.mutation_sigma, indpb=self.mutation_indpb)
-
+        # self.toolbox.register("mutate", self.mut_gaussian_normalized, sigma=self.mutation_sigma, indpb=self.mutation_indpb)
+        self.toolbox.register("mutate", self.mut_swap)
         self.toolbox.register("evaluate", evaluate)
 
         # num_cores = multiprocessing.cpu_count()  # Get available CPU cores
@@ -137,44 +132,40 @@ class CatanGA:
     def normalize(self, individual):
         total = sum(individual)
         for i in range(len(individual)):
-            individual[i] = np.round(individual[i] / total, 4)
+            individual[i] = round(individual[i] / total, 4)
 
         difference = 1.0 - sum(individual)
         if difference != 0:
             max_index = individual.index(max(individual))
-            individual[max_index] = np.round(individual[max_index] + difference, 4)
+            individual[max_index] = round(individual[max_index] + difference, 4)
         return
 
-    def cx_blend_weighted(self, ind1, ind2, alpha=0.5):
+    def cx_blend_weighted(self, ind1, ind2):
+
+        alpha = np.random.randint(10) / 10
 
         for i in range(len(ind1)):
-            mix = (1 - alpha) * ind1[i] + alpha * ind2[i]
-            ind1[i] = mix
-            ind2[i] = mix
-
-        # Normalize both offspring
-        self.normalize(ind1)
-        self.normalize(ind2)
-
-        return ind1, ind2
-
-
-    def cx_two_point_normalized(self, ind1, ind2):
-        tools.cxTwoPoint(ind1, ind2) 
+            mix1 = (1 - alpha) * ind1[i] + alpha * ind2[i]
+            mix2 = alpha * ind1[i] + (1 - alpha) * ind2[i]
+            ind1[i] = mix1
+            ind2[i] = mix2
 
         self.normalize(ind1)
         self.normalize(ind2)
 
         return ind1, ind2
 
-    def mut_gaussian_normalized(self, individual, sigma, indpb):
-        for i in range(len(individual)):
-            if random.random() < indpb:
-                individual[i] += random.gauss(0, sigma)
-                individual[i] = max(individual[i], 0)
-                individual[i] = min(individual[i], 1)
-        self.normalize(individual)
-        return individual,
+
+    def mut_swap(self, individual):
+        ind_swap = swap_probabilities_np(individual)
+        inx = np.random.randint(5)
+        individual[inx] = ind_swap[inx]
+        individual[10 - inx - 1] = ind_swap[10 - inx - 1]
+
+        if np.sum(individual) != 1:
+            self.normalize(individual)
+
+        return individual, 
 
     def run(self):
         global fitness_cache
