@@ -12,17 +12,15 @@ from Agents.PabloAleixAlexAgent import PabloAleixAlexAgent as paaa
 from Agents.SigmaAgent import SigmaAgent as sa
 from Agents.TristanAgent import TristanAgent as ta
 from Managers.GameDirector import GameDirector
+from concurrent.futures import ProcessPoolExecutor
 
-import multiprocessing
-
-# List of agents
 AGENTS = [ra, aha, apa, apja, cza, ca, ea, paaa, sa, ta]
 N = 100
-gen_aux = -1
-G = 20
+fitness_cache = {}
+gen_aux = 0
+G = 100
 
 def swap_probabilities_np(prob_array):
-
     sorted_indices = np.argsort(prob_array)
     swapped_probs = prob_array.copy()
     n = len(prob_array)
@@ -33,20 +31,27 @@ def swap_probabilities_np(prob_array):
 
     return swapped_probs
 
+
 def evaluate(individual):
-    print(gen_aux)
+
+    global fitness_cache
+    individual_tuple = tuple(individual)
+
+    if individual_tuple in fitness_cache:
+        return fitness_cache[individual_tuple]
+    
     total_wins = 0
     player = random.choices(AGENTS, weights=individual, k=1)[0]
     aux = np.delete(individual, AGENTS.index(player))
     aux_swap = swap_probabilities_np(aux)
-    equal_probs = 0.1*np.ones(9)
-
+    aux_swap = aux_swap / np.sum(aux_swap)
+    equal_probs = (1/9)*np.ones(9)
     opp_probs = (1-(gen_aux/G))*aux_swap + (gen_aux/G)*equal_probs
+
     for _ in range(N):
-        # opponents = random.sample([agent for agent in AGENTS if agent != player], 3)
-        # opponents = random.choices([agent for agent in AGENTS if agent != player], weights = aux_swap, k=3)
-        opponents = random.choices([agent for agent in AGENTS if agent != player], weights = opp_probs, k = 3)
-        players = [player] + opponents
+        # opponents = np.random.choice([agent for agent in AGENTS if agent != player], size=3, p=aux_swap)
+        opponents = np.random.choice([agent for agent in AGENTS if agent != player], size=3, p=opp_probs)
+        players = [player] + list(opponents)
         random.shuffle(players)
 
         try:
@@ -60,26 +65,30 @@ def evaluate(individual):
             sorted_victory_points = dict(sorted(victory_points.items(), key=lambda item: int(item[1]), reverse=True))
             players_ranking = list(sorted_victory_points.keys())
             ind_player = players.index(player)
-            pos = int(players_ranking[ind_player].lstrip("J"))
+            pos = players_ranking.index('J' + str(ind_player))
             if pos < 3:
-                total_wins += (1/2**pos)
+                total_wins += (1 / 2**pos)
 
         except Exception as e:
             print(f"Error in game simulation: {e}")
 
-    return (total_wins / N,) 
+    fitness = total_wins / N
+    fitness_cache[individual_tuple] = (fitness,)
+
+    return (fitness,)
+
 
 class CatanGA:
     def __init__(self, 
-                 population_size=20, 
+                 population_size=100, 
                  generations=50, 
                  mutation_prob=0.2, 
                  crossover_prob=0.5, 
                  selection_method="tournament", 
-                 tournament_size=3,
-                 mutation_sigma=0.1, 
-                 mutation_indpb=0.2, 
-                 num_games_per_individual=5):
+                 tournament_size=4,
+                 mutation_sigma=0.05, 
+                 mutation_indpb=0.1, 
+                 num_games_per_individual=100):
 
         self.population_size = population_size
         self.generations = generations
@@ -100,9 +109,7 @@ class CatanGA:
 
         def generate_probabilities():
             probs = np.random.dirichlet(np.ones(len(AGENTS)), size=1)[0]
-            probs = probs.tolist()
-            self.normalize(probs)
-            return probs
+            return np.round(probs, 4)
 
         self.toolbox.register("individual", tools.initIterate, creator.Individual, generate_probabilities)
         self.toolbox.register("population", tools.initRepeat, list, self.toolbox.individual)
@@ -118,12 +125,13 @@ class CatanGA:
 
         self.toolbox.register("mate", self.cx_blend_weighted)
         # self.toolbox.register("mate", self.cx_two_point_normalized)
-        self.toolbox.register("mutate", self.mut_gaussian_normalized, sigma=self.mutation_sigma, indpb=self.mutation_indpb)
-
+        # self.toolbox.register("mutate", self.mut_gaussian_normalized, sigma=self.mutation_sigma, indpb=self.mutation_indpb)
+        self.toolbox.register("mutate", self.mut_swap)
         self.toolbox.register("evaluate", evaluate)
 
-        num_cores = multiprocessing.cpu_count()  # Get available CPU cores
-        self.pool = multiprocessing.Pool(processes=num_cores)  # Create a process pool
+        # num_cores = multiprocessing.cpu_count()  # Get available CPU cores
+        # self.pool = multiprocessing.Pool(processes=num_cores)  # Create a process pool
+        self.pool = ProcessPoolExecutor()
         self.toolbox.register("map", self.pool.map)
 
     def normalize(self, individual):
@@ -137,38 +145,38 @@ class CatanGA:
             individual[max_index] = round(individual[max_index] + difference, 4)
         return
 
-    def cx_blend_weighted(self, ind1, ind2, alpha=0.5):
+    def cx_blend_weighted(self, ind1, ind2):
+
+        if ind1.fitness.values > ind2.fitness.values:
+            alpha = np.random.randint(5) / 10
+        else:
+            alpha = np.random.randint(5, 10) / 10
 
         for i in range(len(ind1)):
-            mix = (1 - alpha) * ind1[i] + alpha * ind2[i]
-            ind1[i] = mix
-            ind2[i] = mix
-
-        # Normalize both offspring
-        self.normalize(ind1)
-        self.normalize(ind2)
-
-        return ind1, ind2
-
-
-    def cx_two_point_normalized(self, ind1, ind2):
-        tools.cxTwoPoint(ind1, ind2) 
+            mix1 = (1 - alpha) * ind1[i] + alpha * ind2[i]
+            mix2 = alpha * ind1[i] + (1 - alpha) * ind2[i]
+            ind1[i] = mix1
+            ind2[i] = mix2
 
         self.normalize(ind1)
         self.normalize(ind2)
 
         return ind1, ind2
 
-    def mut_gaussian_normalized(self, individual, sigma, indpb):
-        for i in range(len(individual)):
-            if random.random() < indpb:
-                individual[i] += random.gauss(0, sigma)
-                individual[i] = max(individual[i], 0)
-        self.normalize(individual)
-        return individual,
+
+    def mut_swap(self, individual):
+        ind_swap = swap_probabilities_np(individual)
+        inx = np.random.randint(5)
+        individual[inx] = ind_swap[inx]
+        individual[10 - inx - 1] = ind_swap[10 - inx - 1]
+
+        if np.sum(individual) != 1:
+            self.normalize(individual)
+
+        return individual, 
 
     def run(self):
-        global gen_aux
+        global fitness_cache, gen_aux
         population = self.toolbox.population(n=self.population_size)
         hall_of_fame = tools.HallOfFame(1)
 
@@ -177,6 +185,7 @@ class CatanGA:
         stats.register("max", np.max)
 
         self.logbook.clear()
+        fitness_cache = {}
 
         for gen in range(self.generations):
             gen_aux += 1
@@ -189,14 +198,15 @@ class CatanGA:
             self.logbook.record(gen = gen, **record) 
 
             best_ind = tools.selBest(population, 1)[0]
-            print(f"Generation {gen} - Best Individual: {best_ind}, Max Fitness: {record['max']:.4f}, Avg Fitness: {record['avg']:.4f}")
+            print(f"Generation {gen} - Best Individual: {[float(x) for x in best_ind]}, Max Fitness: {record['max']:.4f}, Avg Fitness: {record['avg']:.4f}")
 
             hall_of_fame.update(population)
 
             population = self.toolbox.select(population, k=len(population)//2)
             population.extend(algorithms.varAnd(population, self.toolbox, cxpb=self.crossover_prob, mutpb=self.mutation_prob))
 
-        self.pool.close()
-        self.pool.join()
+        # self.pool.close()
+        # self.pool.join()
+        self.pool.shutdown()
         agent_ind = hall_of_fame[0].index(max(hall_of_fame[0]))
         return hall_of_fame[0], AGENTS[agent_ind]

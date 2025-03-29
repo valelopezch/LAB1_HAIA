@@ -18,17 +18,6 @@ AGENTS = [ra, aha, apa, apja, cza, ca, ea, paaa, sa, ta]
 N = 100
 fitness_cache = {}
 
-def swap_probabilities_np(prob_array):
-    sorted_indices = np.argsort(prob_array)
-    swapped_probs = prob_array.copy()
-    n = len(prob_array)
-    
-    for i in range(n // 2):
-        low_idx, high_idx = sorted_indices[i], sorted_indices[n - i - 1]
-        swapped_probs[low_idx], swapped_probs[high_idx] = swapped_probs[high_idx], swapped_probs[low_idx]
-
-    return swapped_probs
-
 
 def evaluate(individual):
 
@@ -40,12 +29,10 @@ def evaluate(individual):
     
     total_wins = 0
     player = random.choices(AGENTS, weights=individual, k=1)[0]
-    aux = np.delete(individual, AGENTS.index(player))
-    aux_swap = swap_probabilities_np(aux)
-    aux_swap = aux_swap / np.sum(aux_swap)
+    equal_probs = (1/9)*np.ones(9)
 
     for _ in range(N):
-        opponents = np.random.choice([agent for agent in AGENTS if agent != player], size=3, p=aux_swap)
+        opponents = np.random.choice([agent for agent in AGENTS if agent != player], size=3, p=equal_probs)
         players = [player] + list(opponents)
         random.shuffle(players)
 
@@ -60,7 +47,7 @@ def evaluate(individual):
             sorted_victory_points = dict(sorted(victory_points.items(), key=lambda item: int(item[1]), reverse=True))
             players_ranking = list(sorted_victory_points.keys())
             ind_player = players.index(player)
-            pos = int(players_ranking[ind_player].lstrip("J"))
+            pos = players_ranking.index('J' + str(ind_player))
             if pos < 3:
                 total_wins += (1 / 2**pos)
 
@@ -75,15 +62,15 @@ def evaluate(individual):
 
 class CatanGA:
     def __init__(self, 
-                 population_size=20, 
+                 population_size=150, 
                  generations=50, 
                  mutation_prob=0.2, 
                  crossover_prob=0.5, 
                  selection_method="tournament", 
-                 tournament_size=3,
+                 tournament_size=4,
                  mutation_sigma=0.1, 
                  mutation_indpb=0.2, 
-                 num_games_per_individual=5):
+                 num_games_per_individual=100):
 
         self.population_size = population_size
         self.generations = generations
@@ -119,8 +106,6 @@ class CatanGA:
             raise ValueError("Invalid selection method. Choose 'tournament', 'roulette', or 'best'.")
 
         self.toolbox.register("mate", self.cx_blend_weighted)
-        # self.toolbox.register("mate", self.cx_two_point_normalized)
-        # self.toolbox.register("mutate", self.mut_gaussian_normalized, sigma=self.mutation_sigma, indpb=self.mutation_indpb)
         self.toolbox.register("mutate", self.mut_swap)
         self.toolbox.register("evaluate", evaluate)
 
@@ -142,7 +127,7 @@ class CatanGA:
 
     def cx_blend_weighted(self, ind1, ind2):
 
-        alpha = np.random.randint(10) / 10
+        alpha = self.crossover_prob
 
         for i in range(len(ind1)):
             mix1 = (1 - alpha) * ind1[i] + alpha * ind2[i]
@@ -157,10 +142,12 @@ class CatanGA:
 
 
     def mut_swap(self, individual):
-        ind_swap = swap_probabilities_np(individual)
-        inx = np.random.randint(5)
-        individual[inx] = ind_swap[inx]
-        individual[10 - inx - 1] = ind_swap[10 - inx - 1]
+        min_prob = np.min(individual)
+        min_inx = individual.index(min_prob)
+        max_prob = np.max(individual)
+        max_inx = individual.index(max_prob)
+        individual[max_inx] = individual[max_inx] + self.mutation_sigma
+        individual[min_inx] = individual[min_inx] - self.mutation_sigma
 
         if np.sum(individual) != 1:
             self.normalize(individual)
